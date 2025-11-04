@@ -1,0 +1,256 @@
+name: Validate Problem Submission
+
+on:
+  pull_request:
+    paths:
+      - 'problems/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'problems/**'
+
+jobs:
+  validate-structure:
+    name: Validate Problem Structure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: problems/**
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Validate problem structure
+        run: |
+          python scripts/validate-structure.py ${{ steps.changed-files.outputs.all_changed_files }}
+        
+      - name: Check metadata.json
+        run: |
+          python scripts/validate-metadata.py ${{ steps.changed-files.outputs.all_changed_files }}
+
+  test-csharp:
+    name: Test C# Problems
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, '.cs') || github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+      
+      - name: Get changed C# problems
+        id: changed-csharp
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD | grep 'csharp/' | cut -d'/' -f1-3 | uniq)
+          echo "problems=${CHANGED}" >> $GITHUB_OUTPUT
+      
+      - name: Test C# problems
+        run: |
+          EXIT_CODE=0
+          
+          for problem_dir in ${{ steps.changed-csharp.outputs.problems }}; do
+            if [ -d "$problem_dir/csharp" ]; then
+              echo "Testing $problem_dir/csharp"
+              cd "$problem_dir/csharp"
+              
+              # Create test project if it doesn't exist
+              if [ ! -f "Tests.csproj" ]; then
+                cat > Tests.csproj << 'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0</TargetFramework>
+              <IsPackable>false</IsPackable>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+              <PackageReference Include="xunit" Version="2.6.0" />
+              <PackageReference Include="xunit.runner.visualstudio" Version="2.5.0" />
+            </ItemGroup>
+          </Project>
+          EOF
+              fi
+              
+              # Test with buggy code (should FAIL)
+              echo "Testing buggy code..."
+              cp buggy.cs Solution.cs
+              
+              if dotnet test --nologo --verbosity quiet; then
+                echo "❌ ERROR: Tests passed with buggy code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly failed with buggy code"
+              fi
+              
+              # Test with solution (should PASS)
+              echo "Testing solution code..."
+              cp solution.cs Solution.cs
+              
+              if ! dotnet test --nologo --verbosity quiet; then
+                echo "❌ ERROR: Tests failed with solution code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly passed with solution code"
+              fi
+              
+              cd - > /dev/null
+            fi
+          done
+          
+          exit $EXIT_CODE
+
+  test-javascript:
+    name: Test JavaScript Problems
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, '.js') || github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Get changed JS problems
+        id: changed-js
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD | grep 'javascript/' | cut -d'/' -f1-3 | uniq)
+          echo "problems=${CHANGED}" >> $GITHUB_OUTPUT
+      
+      - name: Test JavaScript problems
+        run: |
+          EXIT_CODE=0
+          
+          for problem_dir in ${{ steps.changed-js.outputs.problems }}; do
+            if [ -d "$problem_dir/javascript" ]; then
+              echo "Testing $problem_dir/javascript"
+              cd "$problem_dir/javascript"
+              
+              # Create package.json if it doesn't exist
+              if [ ! -f "package.json" ]; then
+                cat > package.json << 'EOF'
+          {
+            "type": "module",
+            "scripts": {
+              "test": "jest"
+            },
+            "devDependencies": {
+              "jest": "^29.7.0"
+            }
+          }
+          EOF
+              
+                cat > jest.config.js << 'EOF'
+          export default {
+            testEnvironment: 'node',
+            transform: {}
+          };
+          EOF
+              fi
+              
+              npm install --silent
+              
+              # Test with buggy code (should FAIL)
+              echo "Testing buggy code..."
+              cp buggy.js solution.js
+              
+              if npm test -- --silent 2>/dev/null; then
+                echo "❌ ERROR: Tests passed with buggy code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly failed with buggy code"
+              fi
+              
+              # Test with solution (should PASS)
+              echo "Testing solution code..."
+              cp solution.js solution.js
+              
+              if ! npm test -- --silent 2>/dev/null; then
+                echo "❌ ERROR: Tests failed with solution code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly passed with solution code"
+              fi
+              
+              cd - > /dev/null
+            fi
+          done
+          
+          exit $EXIT_CODE
+
+  test-python:
+    name: Test Python Problems
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, '.py') || github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install pytest
+        run: pip install pytest
+      
+      - name: Get changed Python problems
+        id: changed-python
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD | grep 'python/' | cut -d'/' -f1-3 | uniq)
+          echo "problems=${CHANGED}" >> $GITHUB_OUTPUT
+      
+      - name: Test Python problems
+        run: |
+          EXIT_CODE=0
+          
+          for problem_dir in ${{ steps.changed-python.outputs.problems }}; do
+            if [ -d "$problem_dir/python" ]; then
+              echo "Testing $problem_dir/python"
+              cd "$problem_dir/python"
+              
+              # Test with buggy code (should FAIL)
+              echo "Testing buggy code..."
+              cp buggy.py solution.py
+              
+              if pytest tests.py -v 2>/dev/null; then
+                echo "❌ ERROR: Tests passed with buggy code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly failed with buggy code"
+              fi
+              
+              # Test with solution (should PASS)
+              echo "Testing solution code..."
+              cp solution.py solution.py
+              
+              if ! pytest tests.py -v 2>/dev/null; then
+                echo "❌ ERROR: Tests failed with solution code in $problem_dir"
+                EXIT_CODE=1
+              else
+                echo "✅ Tests correctly passed with solution code"
+              fi
+              
+              cd - > /dev/null
+            fi
+          done
+          
+          exit $EXIT_CODE
