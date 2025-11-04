@@ -1,0 +1,58 @@
+name: Auto Label PRs
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  label:
+    name: Apply Labels
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Label by difficulty
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Get changed files
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            
+            const labels = new Set();
+            
+            for (const file of files) {
+              const filePath = file.filename;
+              
+              // Check difficulty
+              if (filePath.includes('problems/easy/')) labels.add('difficulty: easy');
+              if (filePath.includes('problems/medium/')) labels.add('difficulty: medium');
+              if (filePath.includes('problems/hard/')) labels.add('difficulty: hard');
+              
+              // Check languages
+              if (filePath.includes('/csharp/')) labels.add('lang: C#');
+              if (filePath.includes('/javascript/')) labels.add('lang: JavaScript');
+              if (filePath.includes('/python/')) labels.add('lang: Python');
+              
+              // Check if new problem
+              if (file.status === 'added' && filePath.includes('metadata.json')) {
+                labels.add('new problem');
+              }
+            }
+            
+            if (labels.size > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: Array.from(labels)
+              });
+            }
