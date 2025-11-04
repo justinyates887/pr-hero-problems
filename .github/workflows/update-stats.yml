@@ -1,0 +1,55 @@
+name: Update Statistics
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'problems/**'
+  workflow_dispatch:
+
+jobs:
+  update-stats:
+    name: Update README Stats
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Calculate stats
+        id: stats
+        run: |
+          EASY=$(find problems/easy -type d -mindepth 1 -maxdepth 1 | wc -l)
+          MEDIUM=$(find problems/medium -type d -mindepth 1 -maxdepth 1 | wc -l)
+          HARD=$(find problems/hard -type d -mindepth 1 -maxdepth 1 | wc -l)
+          TOTAL=$((EASY + MEDIUM + HARD))
+          
+          CSHARP=$(find problems -name "*.cs" -path "*/csharp/*" | wc -l)
+          JS=$(find problems -name "*.js" -path "*/javascript/*" | wc -l)
+          PYTHON=$(find problems -name "*.py" -path "*/python/*" | wc -l)
+          LANG_IMPLS=$((CSHARP + JS + PYTHON))
+          
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "easy=$EASY" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+          echo "hard=$HARD" >> $GITHUB_OUTPUT
+          echo "implementations=$LANG_IMPLS" >> $GITHUB_OUTPUT
+      
+      - name: Update README badges
+        run: |
+          sed -i "s/problems-[0-9]\+-blue/problems-${{ steps.stats.outputs.total }}-blue/" README.md
+      
+      - name: Update stats section
+        run: |
+          sed -i "s/\*\*[0-9]\+\*\* problems/**${{ steps.stats.outputs.total }}** problems/" README.md
+          sed -i "s/\*\*[0-9]\+\+\*\* language implementations/**${{ steps.stats.outputs.implementations }}+** language implementations/" README.md
+      
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 Update repository statistics" && git push)
